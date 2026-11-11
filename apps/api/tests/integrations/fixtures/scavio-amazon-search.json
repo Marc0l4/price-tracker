@@ -1,0 +1,17 @@
+{
+  "data": {
+    "query": "fone bluetooth",
+    "page": 1,
+    "products": [
+      {
+        "asin": "B0EXAMPLE1",
+        "title": "Fone Bluetooth Exemplo",
+        "url": "https://www.amazon.com.br/dp/B0EXAMPLE1",
+        "image": "https://m.media-amazon.com/images/I/example.jpg",
+        "price": 199.9,
+        "currency": "BRL"
+      }
+    ]
+  },
+  "credits_used": 1
+}

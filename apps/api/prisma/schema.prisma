@@ -1,0 +1,178 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MatchStatus {
+  confirmed
+  provisional
+  review_required
+}
+
+enum CollectionRunStatus {
+  running
+  completed
+  partial
+  failed
+}
+
+enum CollectionTrigger {
+  manual
+  scheduled
+}
+
+enum ProviderCollectionRunStatus {
+  running
+  success
+  failed
+}
+
+model TrackedSearch {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  query           String               @unique
+  active          Boolean              @default(true)
+  lastCollectedAt DateTime?            @db.Timestamptz(3)
+  collectionRuns  CollectionRun[]
+  offerScopes     TrackedSearchOffer[]
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+
+  @@index([active])
+}
+
+model CollectionRun {
+  id                  String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectionKey       String                  @unique
+  trackedSearchId     String                  @db.Uuid
+  trackedSearch       TrackedSearch           @relation(fields: [trackedSearchId], references: [id], onDelete: Restrict)
+  query               String
+  status              CollectionRunStatus     @default(running)
+  trigger             CollectionTrigger
+  attempt             Int                     @default(1)
+  startedAt           DateTime                @db.Timestamptz(3)
+  attemptStartedAt    DateTime                @db.Timestamptz(3)
+  finishedAt          DateTime?               @db.Timestamptz(3)
+  durationMs          Int?
+  productsReceived    Int                     @default(0)
+  matchedGroupCount   Int                     @default(0)
+  persistedGroupCount Int                     @default(0)
+  failedGroupCount    Int                     @default(0)
+  errorCode           String?
+  providerRuns        ProviderCollectionRun[]
+  createdAt           DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                @updatedAt @db.Timestamptz(3)
+
+  @@index([status, startedAt])
+  @@index([trackedSearchId, startedAt])
+}
+
+model ProviderCollectionRun {
+  id              String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectionRunId String                      @db.Uuid
+  collectionRun   CollectionRun               @relation(fields: [collectionRunId], references: [id], onDelete: Restrict)
+  provider        String
+  attempt         Int
+  status          ProviderCollectionRunStatus @default(running)
+  startedAt       DateTime                    @db.Timestamptz(3)
+  finishedAt      DateTime?                   @db.Timestamptz(3)
+  durationMs      Int?
+  resultCount     Int?
+  errorCode       String?
+  createdAt       DateTime                    @default(now()) @db.Timestamptz(3)
+
+  @@unique([collectionRunId, provider, attempt])
+  @@index([collectionRunId, provider])
+}
+
+model TrackedSearchOffer {
+  trackedSearchId String        @db.Uuid
+  offerId         String        @db.Uuid
+  trackedSearch   TrackedSearch @relation(fields: [trackedSearchId], references: [id], onDelete: Restrict)
+  offer           Offer         @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  isActive        Boolean       @default(true)
+  lastSeenAt      DateTime      @default(now()) @db.Timestamptz(3)
+  lastCheckedAt   DateTime      @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@id([trackedSearchId, offerId])
+  @@index([offerId])
+}
+
+model CanonicalProduct {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  brand            String?
+  model            String?
+  gtin             String?
+  matchStatus      MatchStatus       @default(provisional)
+  providerProducts ProviderProduct[]
+  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(3)
+}
+
+model ProviderProduct {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider           String
+  externalId         String
+  name               String
+  brand              String?
+  model              String?
+  gtin               String?
+  imageUrl           String?
+  canonicalProductId String?           @db.Uuid
+  canonicalProduct   CanonicalProduct? @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
+  matchStatus        MatchStatus       @default(provisional)
+  offers             Offer[]
+  lastObservedAt     DateTime          @default(now()) @db.Timestamptz(3)
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([provider, externalId])
+  @@unique([id, provider])
+  @@index([canonicalProductId])
+}
+
+model Offer {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerProductId String               @db.Uuid
+  provider          String
+  providerProduct   ProviderProduct      @relation(fields: [providerProductId, provider], references: [id, provider], onDelete: Restrict)
+  externalOfferId   String
+  storeName         String?
+  productUrl        String
+  availability      String
+  isActive          Boolean              @default(true)
+  lastSeenAt        DateTime             @default(now()) @db.Timestamptz(3)
+  lastCheckedAt     DateTime             @default(now()) @db.Timestamptz(3)
+  observations      PriceObservation[]
+  trackedSearches   TrackedSearchOffer[]
+  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @db.Timestamptz(3)
+
+  @@unique([provider, externalOfferId])
+  @@index([providerProductId])
+  @@index([providerProductId, isActive])
+  @@index([provider, isActive])
+}
+
+model PriceObservation {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  offerId        String   @db.Uuid
+  offer          Offer    @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  price          Decimal  @db.Decimal(19, 4)
+  currency       String   @db.VarChar(3)
+  shippingAmount Decimal? @db.Decimal(19, 4)
+  shippingIsFree Boolean?
+  collectedAt    DateTime @db.Timestamptz(3)
+  collectionKey  String
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([offerId, collectionKey])
+  @@index([offerId, collectedAt])
+}

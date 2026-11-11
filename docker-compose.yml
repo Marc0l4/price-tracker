@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: price_tracker_dev
+      POSTGRES_USER: price_tracker_dev
+      POSTGRES_PASSWORD: price_tracker_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - price-tracker-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U price_tracker_dev -d price_tracker_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  price-tracker-postgres-data:

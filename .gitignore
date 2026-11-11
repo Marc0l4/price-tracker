@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.production
+.env.*
+!.env.example
+coverage/
+.next/
+*.tsbuildinfo
+*.log
+.test-postgres-*/
+apps/api/src/generated/prisma/
+postgres-data/

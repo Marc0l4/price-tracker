@@ -1,0 +1,72 @@
+name: price-tracker-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: price_tracker_prod
+      POSTGRES_USER: price_tracker_prod
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-price_tracker_prod_password}
+    volumes:
+      - price-tracker-prod-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U price_tracker_prod -d price_tracker_prod"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: builder
+    command: npm run db:migrate --workspace=@price-tracker/api
+    environment:
+      DATABASE_URL: postgresql://price_tracker_prod:${POSTGRES_PASSWORD:-price_tracker_prod_password}@postgres:5432/price_tracker_prod?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      DATABASE_URL: postgresql://price_tracker_prod:${POSTGRES_PASSWORD:-price_tracker_prod_password}@postgres:5432/price_tracker_prod?schema=public
+      API_PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      COLLECTION_SCHEDULER_ENABLED: ${COLLECTION_SCHEDULER_ENABLED:-false}
+      SCAVIO_AMAZON_TIMEOUT_MS: ${SCAVIO_AMAZON_TIMEOUT_MS:-15000}
+      COLLECTION_INTERVAL_MINUTES: ${COLLECTION_INTERVAL_MINUTES:-30}
+      COLLECTION_TIMEOUT_MS: ${COLLECTION_TIMEOUT_MS:-30000}
+      COLLECTION_STALE_RUN_MINUTES: ${COLLECTION_STALE_RUN_MINUTES:-60}
+    ports:
+      - "${API_HOST_PORT:-3001}:3001"
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  price-tracker-prod-postgres-data:

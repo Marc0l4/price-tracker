@@ -1,0 +1,26 @@
+{
+  "name": "price-tracker",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22 <23", "npm": ">=10" },
+  "workspaces": ["apps/*"],
+  "overrides": {
+    "pg": "8.23.1"
+  },
+  "scripts": {
+    "build": "npm run build:api && npm run build:web",
+    "build:api": "npm run build --workspace=@price-tracker/api",
+    "build:web": "npm run build --workspace=@price-tracker/web",
+    "test": "npm run test:api && npm run test:web",
+    "test:api": "npm run test --workspace=@price-tracker/api",
+    "test:web": "npm run test --workspace=@price-tracker/web",
+    "dev": "npm run dev --workspace=@price-tracker/web",
+    "dev:api": "npm run dev:read-api --workspace=@price-tracker/api",
+    "start:api": "npm run start --workspace=@price-tracker/api",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate --workspace=@price-tracker/api",
+    "db:generate": "npm run db:generate --workspace=@price-tracker/api",
+    "collect": "npm run collect --workspace=@price-tracker/api --"
+  }
+}

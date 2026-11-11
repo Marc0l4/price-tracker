@@ -1,0 +1,19 @@
+{
+  "data": {
+    "country": "br",
+    "site_id": "MLB",
+    "query": "fone bluetooth",
+    "results": [{
+      "item_id": "MLB5879981504",
+      "product_id": "MLB52845211",
+      "title": "Fone Bluetooth Samsung Galaxy Buds Core Preto",
+      "url": "https://www.mercadolivre.com.br/fone-bluetooth-samsung-galaxy-buds-core-preto/p/MLB52845211",
+      "image": "https://http2.mlstatic.com/D_NQ_NP_EXAMPLE-O.webp",
+      "price": 242.48,
+      "currency": "BRL",
+      "brand": "Samsung",
+      "seller": { "name": "Samsung", "official_store": true },
+      "free_shipping": true
+    }]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "site_id": "MLB",
+  "query": "iphone",
+  "results": [
+    {
+      "id": "MLB1234567890",
+      "title": "Apple iPhone 15 128 GB Preto",
+      "price": 4999.9,
+      "currency_id": "BRL",
+      "permalink": "https://produto.mercadolivre.com.br/MLB-1234567890-iphone-15-_JM",
+      "thumbnail": "https://http2.mlstatic.com/D_TEST-I.jpg",
+      "available_quantity": 7,
+      "shipping": { "free_shipping": true },
+      "seller": { "nickname": "loja-exemplo" },
+      "attributes": [
+        { "id": "BRAND", "value_name": "Apple" },
+        { "id": "MODEL", "value_name": "iPhone 15" },
+        { "id": "GTIN", "value_name": "0195949030000" }
+      ]
+    }
+  ]
+}
