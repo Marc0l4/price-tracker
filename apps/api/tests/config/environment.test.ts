@@ -12,6 +12,10 @@ describe("configuração de ambiente", () => {
     expect(readApiEnvironmentFromEnvironment(readEnvironment)).toMatchObject({ apiPort: 3001, corsOrigin: "http://localhost:3000", schedulerEnabled: false });
   });
 
+  it("prioriza PORT da plataforma sem alterar o fallback local", () => {
+    expect(readApiEnvironmentFromEnvironment({ ...readEnvironment, PORT: "10000" }).apiPort).toBe(10_000);
+  });
+
   it("aceita scheduler explicitamente habilitado", () => {
     expect(readApiEnvironmentFromEnvironment({ ...readEnvironment, COLLECTION_SCHEDULER_ENABLED: "true" }).schedulerEnabled).toBe(true);
   });

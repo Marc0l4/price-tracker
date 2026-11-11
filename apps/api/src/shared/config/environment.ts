@@ -47,7 +47,7 @@ function booleanFromEnvironment(name: string, value: string | undefined, fallbac
 
 export function readApiEnvironmentFromEnvironment(environment = process.env): ReadApiEnvironment {
   const databaseUrl = parseOrThrow(postgresUrl, "DATABASE_URL", requiredString("DATABASE_URL", environment.DATABASE_URL));
-  const apiPort = parseOrThrow(positiveInteger.max(65_535), "API_PORT", environment.API_PORT ?? environment.READ_API_PORT ?? "3001");
+  const apiPort = parseOrThrow(positiveInteger.max(65_535), "PORT", environment.PORT ?? environment.API_PORT ?? environment.READ_API_PORT ?? "3001");
   const corsOrigin = new URL(parseOrThrow(httpUrl, "CORS_ORIGIN", environment.CORS_ORIGIN ?? environment.WEB_ORIGIN ?? "http://localhost:3000")).origin;
   return { databaseUrl, apiPort, corsOrigin, schedulerEnabled: booleanFromEnvironment("COLLECTION_SCHEDULER_ENABLED", environment.COLLECTION_SCHEDULER_ENABLED, false) };
 }

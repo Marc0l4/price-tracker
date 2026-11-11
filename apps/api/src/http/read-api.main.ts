@@ -21,7 +21,7 @@ if (configuration.schedulerEnabled) {
 }
 
 const shutdown = createGracefulShutdown(server, database, scheduler);
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   console.info(JSON.stringify({ event: "read_api_started", port, schedulerEnabled: configuration.schedulerEnabled }));
   if (scheduler) void scheduler.start().catch(() => console.error(JSON.stringify({ event: "scheduler.start_failed" })));
 });
