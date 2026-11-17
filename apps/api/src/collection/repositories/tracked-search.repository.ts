@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../../generated/prisma/client.js";
+import { Prisma, type PrismaClient } from "../../generated/prisma/client.js";
 
 export function normalizeTrackedQuery(query: string): string {
   return query.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
@@ -10,11 +10,21 @@ export class TrackedSearchRepository {
   async ensure(query: string) {
     const normalized = normalizeTrackedQuery(query);
     if (!normalized) throw new Error("A query monitorada é obrigatória.");
-    return this.db.trackedSearch.upsert({
-      where: { query: normalized },
-      create: { query: normalized },
-      update: {},
-    });
+    try {
+      return await this.db.trackedSearch.upsert({
+        where: { query: normalized },
+        create: { query: normalized },
+        update: {},
+      });
+    } catch (error) {
+      // PostgreSQL can race two native upserts before either transaction commits.
+      // The unique constraint is the authority; the losing caller reads it back.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existing = await this.db.trackedSearch.findUnique({ where: { query: normalized } });
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   findById(id: string) {

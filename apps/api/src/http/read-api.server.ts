@@ -35,10 +35,12 @@ function json(response: ServerResponse, status: number, body: unknown, corsOrigi
 
 function clientAddress(request: IncomingMessage, trustProxy = false): string {
   if (trustProxy) {
-    const forwarded = request.headers["x-forwarded-for"];
-    const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const first = value?.split(",")[0]?.trim();
-    if (first) return first;
+    // Render's Cloudflare edge overwrites this single-value header. Do not use
+    // X-Forwarded-For here: Render appends to that chain and a caller can
+    // control its leftmost value.
+    const cloudflareClient = request.headers["cf-connecting-ip"];
+    const value = Array.isArray(cloudflareClient) ? cloudflareClient[0] : cloudflareClient;
+    if (value?.trim()) return value.trim();
   }
   return request.socket.remoteAddress ?? "unknown";
 }

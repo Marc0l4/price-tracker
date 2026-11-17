@@ -329,16 +329,21 @@ O caminho on-demand não duplica providers, matching, persistência, métricas o
 lifecycle. Ele usa `CollectionRun`/`ProviderCollectionRun` normais e conserva
 o mesmo `collectionKey`/histórico append-only. Duas instâncias coordenam a mesma
 query com `pg_advisory_xact_lock` curto ao criar/observar uma run `running`; a
-segunda aguarda o resultado persistido em vez de chamar providers novamente.
+segunda aguarda o resultado persistido em vez de chamar providers novamente. A
+admissão de quota e a criação da run ocorrem na mesma transação curta: uma
+requisição que apenas se junta a uma run existente não consome quota.
 
 O rate limit só se aplica à **nova coleta**: leituras recentes nunca consomem
 quota. Os contadores persistentes `OnDemandRateLimit` usam uma chave SHA-256 do
 endereço do cliente e janela fixa. `ON_DEMAND_TRUST_PROXY` só deve ser `true`
-atrás de proxy confiável (Render), quando o primeiro `X-Forwarded-For` é o IP
-do cliente. O limite default é 3 novas coletas em 10 minutos; o excesso recebe
+atrás do edge confiável do Render: nesse caso a API usa `CF-Connecting-IP`,
+que o Cloudflare sobrescreve, e não o `X-Forwarded-For` encadeado e controlável
+pelo chamador. O limite default é 3 novas coletas em 10 minutos; o excesso recebe
 `429 on_demand_rate_limited` e `Retry-After`. Falha completa recebe `502`
 sanitizado; sucesso parcial preserva os resultados persistidos do provider que
-funcionou.
+funcionou. As janelas antigas expiram logicamente, mas seus contadores ainda
+permanecem na tabela; uma política de retenção/cleanup é dívida operacional
+futura, fora do caminho de requisição.
 
 O frontend mantém query, página, sort e resultados em memória no
 `SearchStateProvider`. A URL não é usada como fonte persistente de busca; ao
@@ -968,7 +973,7 @@ ou e-commerce.
 | `ON_DEMAND_COLLECTION_TTL_MINUTES` | Read API | reuso de coleta válida; default 360 | não | privada |
 | `ON_DEMAND_RATE_LIMIT_MAX` | Read API | novas coletas por janela/IP; default 3 | não | privada |
 | `ON_DEMAND_RATE_LIMIT_WINDOW_MINUTES` | Read API | janela fixa do limite; default 10 | não | privada |
-| `ON_DEMAND_TRUST_PROXY` | Read API | confia em X-Forwarded-For; default false | não | privada |
+| `ON_DEMAND_TRUST_PROXY` | Read API | confia em `CF-Connecting-IP` do edge Render; default false | não | privada |
 | `NEXT_PUBLIC_API_BASE_URL` | Web | URL pública da Read API embutida no build | sim | pública |
 | `TEST_DATABASE_URL` | testes API | banco/schema explicitamente de teste | não | teste |
 | `TEST_POSTGRES_BIN` | testes API | binários PostgreSQL locais opcionais | não | teste |

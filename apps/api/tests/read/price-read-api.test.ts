@@ -316,7 +316,10 @@ describe("PriceHistoryService e read API", () => {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Servidor indisponível.");
     try {
-      const response = await fetch(`http://127.0.0.1:${address.port}/products?query=playstation%205`, { headers: { "X-Forwarded-For": "198.51.100.24, 10.0.0.1" } });
+      const response = await fetch(`http://127.0.0.1:${address.port}/products?query=playstation%205`, { headers: {
+        "X-Forwarded-For": "203.0.113.99, 10.0.0.1",
+        "CF-Connecting-IP": "198.51.100.24",
+      } });
       expect(response.status).toBe(429);
       expect(response.headers.get("retry-after")).toBe("600");
       expect(clientAddress).toBe("198.51.100.24");

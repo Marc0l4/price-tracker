@@ -1,9 +1,11 @@
-import type { CollectionRun, CollectionRunStatus, CollectionTrigger, ProviderCollectionRunStatus, TrackedSearch } from "../generated/prisma/client.js";
+import type { CollectionRun, CollectionRunStatus, CollectionTrigger, Prisma, ProviderCollectionRunStatus, TrackedSearch } from "../generated/prisma/client.js";
 import type { DetailedSearchResult } from "../services/product-search.service.js";
 import type { CollectionContext, SourcedProduct } from "../persistence/persistence-contracts.js";
 import type { PersistenceBatchResult } from "../persistence/persistence-result.js";
 
-export type CollectionExecutionStatus = CollectionRunStatus | "skipped_overlap" | "skipped_inactive";
+export type CollectionExecutionStatus = CollectionRunStatus | "skipped_overlap" | "skipped_inactive" | "rate_limited";
+
+export type CollectionStartAdmission = (tx: Prisma.TransactionClient) => Promise<boolean>;
 
 export interface CollectionExecutionResult {
   status: CollectionExecutionStatus;

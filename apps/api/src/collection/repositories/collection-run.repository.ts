@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CollectionRunStatus, ProviderCollectionRunStatus, type CollectionTrigger, type PrismaClient } from "../../generated/prisma/client.js";
-import type { ProviderRunCompletion } from "../collection-contracts.js";
+import type { CollectionStartAdmission, ProviderRunCompletion } from "../collection-contracts.js";
 
 export class CollectionRunRepository {
   constructor(private readonly db: PrismaClient) {}
@@ -17,7 +17,13 @@ export class CollectionRunRepository {
    * search. The advisory transaction lock protects this across API instances
    * without holding a database connection during provider HTTP calls.
    */
-  async startOrFindRunning(trackedSearchId: string, query: string, trigger: CollectionTrigger, startedAt: Date) {
+  async startOrFindRunning(
+    trackedSearchId: string,
+    query: string,
+    trigger: CollectionTrigger,
+    startedAt: Date,
+    admission?: CollectionStartAdmission,
+  ) {
     return this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`on-demand-search:${trackedSearchId}`}, 0)) IS NULL AS locked`;
       const running = await tx.collectionRun.findFirst({
@@ -25,6 +31,7 @@ export class CollectionRunRepository {
         orderBy: { attemptStartedAt: "desc" },
       });
       if (running) return { started: false as const, run: running };
+      if (admission && !await admission(tx)) return { started: false as const, denied: true as const };
       const id = randomUUID();
       const run = await tx.collectionRun.create({ data: {
         id, collectionKey: id, trackedSearchId, query, trigger, startedAt, attemptStartedAt: startedAt,

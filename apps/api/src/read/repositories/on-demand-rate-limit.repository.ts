@@ -1,12 +1,14 @@
-import type { PrismaClient } from "../../generated/prisma/client.js";
+import type { Prisma, PrismaClient } from "../../generated/prisma/client.js";
+
+type QueryExecutor = PrismaClient | Prisma.TransactionClient;
 
 /** A fixed-window counter kept in PostgreSQL so Render replicas share quota. */
 export class OnDemandRateLimitRepository {
   constructor(private readonly db: PrismaClient) {}
 
-  async consume(clientKey: string, maximum: number, windowMs: number, now = new Date()): Promise<boolean> {
+  async consume(clientKey: string, maximum: number, windowMs: number, now = new Date(), executor: QueryExecutor = this.db): Promise<boolean> {
     const windowStartedAt = new Date(Math.floor(now.getTime() / windowMs) * windowMs);
-    const accepted = await this.db.$queryRaw<Array<{ requestCount: number }>>`
+    const accepted = await executor.$queryRaw<Array<{ requestCount: number }>>`
       INSERT INTO "OnDemandRateLimit" ("clientKey", "windowStartedAt", "requestCount", "createdAt", "updatedAt")
       VALUES (${clientKey}, ${windowStartedAt}, 1, ${now}, ${now})
       ON CONFLICT ("clientKey", "windowStartedAt") DO UPDATE

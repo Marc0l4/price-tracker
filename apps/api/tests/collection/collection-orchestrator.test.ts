@@ -395,12 +395,13 @@ describe("OnDemandProductSearchService", () => {
     const second = createOnDemandSearch(planned);
     const [a, b] = await Promise.all([
       first.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.4"),
-      second.search("PlayStation  5", 1, 20, "BRL", "history", "198.51.100.5"),
+      second.search("PlayStation  5", 1, 20, "BRL", "history", "198.51.100.4"),
     ]);
     expect(a.total).toBe(1);
     expect(b.total).toBe(1);
     expect(planned.callCount).toBe(1);
     expect(await db.collectionRun.count()).toBe(1);
+    expect(await db.onDemandRateLimit.findFirstOrThrow()).toMatchObject({ requestCount: 1 });
   });
 
   it("preserva resultado parcial e continua retornando o provider que funcionou", async () => {
@@ -436,6 +437,51 @@ describe("OnDemandProductSearchService", () => {
     expect(result).toMatchObject({ total: 0, items: [] });
     expect(planned.callCount).toBe(0);
     expect(await db.trackedSearch.count()).toBe(0);
+  });
+  it("permite tres novas queries e bloqueia a quarta na mesma janela", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { products: [] } }]);
+    const onDemand = createOnDemandSearch(planned, { rateLimitMax: 3 });
+    for (const query of ["playstation 5", "galaxy s24", "nintendo switch"])
+      await onDemand.search(query, 1, 20, "BRL", "history", "198.51.100.10");
+    await expect(onDemand.search("iphone 15", 1, 20, "BRL", "history", "198.51.100.10"))
+      .rejects.toMatchObject({ status: 429, code: "on_demand_rate_limited" });
+    expect(await db.onDemandRateLimit.findFirstOrThrow()).toMatchObject({ requestCount: 3 });
+    expect(planned.callCount).toBe(3);
+  });
+
+  it("consumes only the final rate-limit slot under concurrent requests", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()], delayMs: 20 }, mercadolivre: { products: [], delayMs: 20 } }]);
+    const first = createOnDemandSearch(planned, { rateLimitMax: 3 });
+    const second = createOnDemandSearch(planned, { rateLimitMax: 3 });
+    const client = "198.51.100.11";
+    await first.search("playstation 5", 1, 20, "BRL", "history", client);
+    await first.search("galaxy s24", 1, 20, "BRL", "history", client);
+    const results = await Promise.allSettled([
+      first.search("nintendo switch", 1, 20, "BRL", "history", client),
+      second.search("iphone 15", 1, 20, "BRL", "history", client),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const rejection = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejection?.reason).toMatchObject({ status: 429, code: "on_demand_rate_limited" });
+    expect(await db.onDemandRateLimit.findFirstOrThrow()).toMatchObject({ requestCount: 3 });
+  });
+
+  it("releases on-demand coordination after timeout so a later retry can run", async () => {
+    const planned = new PlannedSearch([
+      { amazon: { products: [playstation()], delayMs: 50 }, mercadolivre: { products: [], delayMs: 50 } },
+      { amazon: { products: [playstation()] }, mercadolivre: { products: [] } },
+    ]);
+    const onDemand = new OnDemandProductSearchService(db, createOrchestrator(planned, 5), {
+      enabled: true, ttlMs: 1, rateLimitMax: 3, rateLimitWindowMs: 10 * 60 * 1_000,
+    });
+    await expect(onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.12"))
+      .rejects.toMatchObject({ status: 502, code: "on_demand_collection_failed" });
+    await expect(onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.12"))
+      .resolves.toMatchObject({ total: 1 });
+    expect(planned.callCount).toBe(2);
+    expect(await db.collectionRun.count()).toBe(2);
+    expect(await db.collectionRun.findFirstOrThrow({ orderBy: { startedAt: "desc" } })).toMatchObject({ status: "completed" });
   });
 });
 

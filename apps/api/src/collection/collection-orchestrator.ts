@@ -3,7 +3,7 @@ import { ProductMatchingService } from "../matching/product-matching.service.js"
 import type { SourcedProduct } from "../persistence/persistence-contracts.js";
 import { CollectionRunRepository } from "./repositories/collection-run.repository.js";
 import { TrackedSearchRepository } from "./repositories/tracked-search.repository.js";
-import type { CollectionExecutionResult, CollectionLogger, CollectionPersistencePort, CollectionSearchPort, ProviderRunCompletion } from "./collection-contracts.js";
+import type { CollectionExecutionResult, CollectionLogger, CollectionPersistencePort, CollectionSearchPort, CollectionStartAdmission, ProviderRunCompletion } from "./collection-contracts.js";
 import { StructuredCollectionLogger } from "./collection-logger.js";
 
 export interface CollectionOrchestratorOptions {
@@ -39,7 +39,6 @@ export class CollectionOrchestrator {
   private readonly trackedSearches: TrackedSearchRepository;
   private readonly runs: CollectionRunRepository;
   private readonly inFlightSearches = new Set<string>();
-  private readonly inFlightOnDemandSearches = new Map<string, Promise<CollectionExecutionResult>>();
   private readonly collectionTimeoutMs: number;
   private readonly staleRunMs: number;
 
@@ -63,21 +62,13 @@ export class CollectionOrchestrator {
   }
 
   /**
-   * Reuses an in-process promise first, then PostgreSQL coordination for
-   * callers served by different API instances. It intentionally delegates all
-   * provider, matching, persistence and lifecycle work to this orchestrator.
+   * PostgreSQL coordinates every API instance. Admission is deliberately kept
+   * inside the same short transaction as run creation; provider HTTP happens
+   * only after that transaction has committed.
    */
-  async runOnDemand(query: string): Promise<CollectionExecutionResult> {
+  async runOnDemand(query: string, admission?: CollectionStartAdmission): Promise<CollectionExecutionResult> {
     const trackedSearch = await this.trackedSearches.ensure(query);
-    const inFlight = this.inFlightOnDemandSearches.get(trackedSearch.id);
-    if (inFlight) return inFlight;
-    const execution = this.runOnDemandTrackedSearch(trackedSearch);
-    this.inFlightOnDemandSearches.set(trackedSearch.id, execution);
-    try {
-      return await execution;
-    } finally {
-      this.inFlightOnDemandSearches.delete(trackedSearch.id);
-    }
+    return this.runOnDemandTrackedSearch(trackedSearch, admission);
   }
 
   async runScheduled(): Promise<CollectionExecutionResult[]> {
@@ -142,9 +133,10 @@ export class CollectionOrchestrator {
     return recovered;
   }
 
-  private async runOnDemandTrackedSearch(trackedSearch: TrackedSearch): Promise<CollectionExecutionResult> {
+  private async runOnDemandTrackedSearch(trackedSearch: TrackedSearch, admission?: CollectionStartAdmission): Promise<CollectionExecutionResult> {
     if (!trackedSearch.active) return { status: "skipped_inactive" };
-    const start = await this.runs.startOrFindRunning(trackedSearch.id, trackedSearch.query, CollectionTrigger.manual, new Date());
+    const start = await this.runs.startOrFindRunning(trackedSearch.id, trackedSearch.query, CollectionTrigger.manual, new Date(), admission);
+    if ("denied" in start) return { status: "rate_limited" };
     if (start.started) return this.executeSafely(start.run, trackedSearch);
     return this.waitForRunningRun(start.run.id);
   }

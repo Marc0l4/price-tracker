@@ -105,7 +105,7 @@ do banco entre containers.
 | Backend privada | `ON_DEMAND_COLLECTION_ENABLED` | Feature flag da coleta sob demanda; padrão `false`. |
 | Backend privada | `ON_DEMAND_COLLECTION_TTL_MINUTES` | Tempo de reuso de uma coleta válida; padrão 360 minutos. |
 | Backend privada | `ON_DEMAND_RATE_LIMIT_MAX`, `ON_DEMAND_RATE_LIMIT_WINDOW_MINUTES` | Limite persistente por cliente para novas coletas; padrão 3 em 10 minutos. |
-| Backend privada | `ON_DEMAND_TRUST_PROXY` | Usa `X-Forwarded-For` somente atrás de proxy confiável, como Render. |
+| Backend privada | `ON_DEMAND_TRUST_PROXY` | Usa `CF-Connecting-IP` somente atrás do edge confiável do Render; não aceita `X-Forwarded-For` encadeado. |
 | Frontend pública | `NEXT_PUBLIC_API_BASE_URL` | URL pública da API; é embutida no build web. |
 
 Não use `NEXT_PUBLIC_*` para banco, tokens ou chaves de providers. A API valida
