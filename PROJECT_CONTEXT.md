@@ -358,6 +358,11 @@ parcial se outro provider exceder o budget. Os limites individuais default são
 `on_demand_search.timing` e `collection.timing` registram tempos, cache state,
 providers, matching, persistência e budget sem IP ou segredo.
 
+O budget é propagado como `AbortSignal` para providers, HTTP e espera na fila
+Scavio, cancelando cooperativamente trabalho pendente sem remover o limiter. O
+frontend encerra a espera da busca após 40 segundos, acima do budget backend,
+para evitar loading infinito sem prometer uma duração exata ao usuário.
+
 O frontend mantém query, página, sort e resultados em memória no
 `SearchStateProvider`. A URL não é usada como fonte persistente de busca; ao
 carregar `/?q=...`, a implementação atual limpa a query da URL. F5 reinicia o
