@@ -318,7 +318,9 @@ O fluxo é:
    somente do banco, inclusive quando o resultado válido é vazio;
 6. query inédita, falha anterior ou TTL expirado podem usar o
    `CollectionOrchestrator`, que persiste e depois relê o catálogo;
-7. a ordenação global ocorre no PostgreSQL antes de `OFFSET/LIMIT`, e a Web
+7. `lastCollectedAt` só é atualizado quando não houve falha de persistência;
+   uma execução parcial por persistência permanece elegível para retry;
+8. a ordenação global ocorre no PostgreSQL antes de `OFFSET/LIMIT`, e a Web
    recebe Decimal como string com quatro casas.
 
 Produto sem histórico pode aparecer no catálogo se sua identidade existir; nesse

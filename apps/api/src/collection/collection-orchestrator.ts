@@ -243,7 +243,11 @@ export class CollectionOrchestrator {
       persistedGroupCount,
       failedGroupCount,
     }, status === CollectionRunStatus.failed ? "all_providers_failed" : persistenceFailed ? "persistence_partial" : undefined);
-    if (successfulProviders.length) await this.trackedSearches.markCollected(trackedSearch.id, finishedAt);
+    // A provider response alone is not a reusable cached collection when any
+    // persistence unit failed: retry must remain possible to repair the
+    // incomplete catalog/history state.
+    if (successfulProviders.length && !persistenceFailed)
+      await this.trackedSearches.markCollected(trackedSearch.id, finishedAt);
     this.logger.info("collection.finished", {
       collectionRunId: run.id,
       query: trackedSearch.query,

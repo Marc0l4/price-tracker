@@ -202,6 +202,7 @@ describe("CollectionOrchestrator", () => {
     const result = await createOrchestrator(new PlannedSearch([{ amazon: { products: [conflict] }, mercadolivre: { products: [product("mercadolivre", "valid", 300)] } }])).runManual("iphone 15");
     expect(result.status).toBe("partial");
     expect(result.collectionRun).toMatchObject({ failedGroupCount: 1, persistedGroupCount: 1 });
+    expect((await db.trackedSearch.findFirstOrThrow()).lastCollectedAt).toBeNull();
   });
 
   it("retry reutiliza collectionKey e não duplica PriceObservation", async () => {
