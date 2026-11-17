@@ -12,6 +12,38 @@ export class CollectionRunRepository {
     } });
   }
 
+  /**
+   * Atomically observes or creates the running CollectionRun for one logical
+   * search. The advisory transaction lock protects this across API instances
+   * without holding a database connection during provider HTTP calls.
+   */
+  async startOrFindRunning(trackedSearchId: string, query: string, trigger: CollectionTrigger, startedAt: Date) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`on-demand-search:${trackedSearchId}`}, 0)) IS NULL AS locked`;
+      const running = await tx.collectionRun.findFirst({
+        where: { trackedSearchId, status: CollectionRunStatus.running },
+        orderBy: { attemptStartedAt: "desc" },
+      });
+      if (running) return { started: false as const, run: running };
+      const id = randomUUID();
+      const run = await tx.collectionRun.create({ data: {
+        id, collectionKey: id, trackedSearchId, query, trigger, startedAt, attemptStartedAt: startedAt,
+      } });
+      return { started: true as const, run };
+    });
+  }
+
+  findById(runId: string) {
+    return this.db.collectionRun.findUnique({ where: { id: runId } });
+  }
+
+  findRunningByTrackedSearch(trackedSearchId: string) {
+    return this.db.collectionRun.findFirst({
+      where: { trackedSearchId, status: CollectionRunStatus.running },
+      orderBy: { attemptStartedAt: "desc" },
+    });
+  }
+
   async restart(runId: string, startedAt: Date) {
     const previous = await this.db.collectionRun.findUniqueOrThrow({ where: { id: runId }, include: { trackedSearch: true } });
     if (previous.status === CollectionRunStatus.running) throw new Error("A execução ainda está em andamento.");

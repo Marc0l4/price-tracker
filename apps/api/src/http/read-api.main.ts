@@ -5,6 +5,7 @@ import { createCollectionOrchestrator, createCollectionScheduler } from "../inde
 import type { CollectionScheduler } from "../collection/collection-scheduler.js";
 import { createGracefulShutdown } from "../shared/runtime/graceful-shutdown.js";
 import { createPrismaClient } from "../infrastructure/database/prisma-client.js";
+import { OnDemandProductSearchService } from "../read/on-demand-product-search.service.js";
 
 loadProjectEnv();
 
@@ -12,17 +13,34 @@ const configuration = readApiEnvironmentFromEnvironment();
 const port = configuration.apiPort;
 
 const database = createPrismaClient(configuration.databaseUrl);
-const server = createReadApiServer(database.client, { corsOrigin: configuration.corsOrigin, version: process.env.npm_package_version });
 let scheduler: CollectionScheduler | undefined;
+let onDemandSearch: OnDemandProductSearchService | undefined;
+let collectionConfiguration;
 
-if (configuration.schedulerEnabled) {
-  const collectionConfiguration = collectionEnvironmentFromEnvironment();
-  scheduler = createCollectionScheduler(createCollectionOrchestrator(database.client, collectionConfiguration), collectionConfiguration);
+if (configuration.schedulerEnabled || configuration.onDemandCollectionEnabled) {
+  collectionConfiguration = collectionEnvironmentFromEnvironment();
+  const orchestrator = createCollectionOrchestrator(database.client, collectionConfiguration);
+  if (configuration.schedulerEnabled) scheduler = createCollectionScheduler(orchestrator, collectionConfiguration);
+  if (configuration.onDemandCollectionEnabled) {
+    onDemandSearch = new OnDemandProductSearchService(database.client, orchestrator, {
+      enabled: true,
+      ttlMs: configuration.onDemandCollectionTtlMs,
+      rateLimitMax: configuration.onDemandRateLimitMax,
+      rateLimitWindowMs: configuration.onDemandRateLimitWindowMs,
+    });
+  }
 }
+
+const server = createReadApiServer(database.client, {
+  corsOrigin: configuration.corsOrigin,
+  version: process.env.npm_package_version,
+  onDemandSearch,
+  onDemandTrustProxy: configuration.onDemandTrustProxy,
+});
 
 const shutdown = createGracefulShutdown(server, database, scheduler);
 server.listen(port, "0.0.0.0", () => {
-  console.info(JSON.stringify({ event: "read_api_started", port, schedulerEnabled: configuration.schedulerEnabled }));
+  console.info(JSON.stringify({ event: "read_api_started", port, schedulerEnabled: configuration.schedulerEnabled, onDemandCollectionEnabled: configuration.onDemandCollectionEnabled }));
   if (scheduler) void scheduler.start().catch(() => console.error(JSON.stringify({ event: "scheduler.start_failed" })));
 });
 

@@ -19,7 +19,7 @@ export function createProductSearchService(configuration = collectionEnvironment
 export function createCollectionOrchestrator(db: PrismaClient, configuration = collectionEnvironmentFromEnvironment()): CollectionOrchestrator {
   return new CollectionOrchestrator(
     db,
-    createProductSearchService(),
+    createProductSearchService(configuration),
     new ProductPersistenceService(db),
     undefined,
     undefined,
@@ -47,6 +47,7 @@ export { CollectionOrchestrator } from "./collection/collection-orchestrator.js"
 export { CollectionScheduler } from "./collection/collection-scheduler.js";
 export type { CollectionExecutionResult, CollectionExecutionStatus } from "./collection/collection-contracts.js";
 export { ProductQueryService } from "./read/product-query.service.js";
+export { OnDemandProductSearchService } from "./read/on-demand-product-search.service.js";
 export { PriceHistoryService } from "./read/price-history.service.js";
 export { createReadApiServer } from "./http/read-api.server.js";
 export type * from "./types/normalized-product.js";

@@ -39,6 +39,7 @@ export class CollectionOrchestrator {
   private readonly trackedSearches: TrackedSearchRepository;
   private readonly runs: CollectionRunRepository;
   private readonly inFlightSearches = new Set<string>();
+  private readonly inFlightOnDemandSearches = new Map<string, Promise<CollectionExecutionResult>>();
   private readonly collectionTimeoutMs: number;
   private readonly staleRunMs: number;
 
@@ -59,6 +60,24 @@ export class CollectionOrchestrator {
   async runManual(query: string): Promise<CollectionExecutionResult> {
     const trackedSearch = await this.trackedSearches.ensure(query);
     return this.runTrackedSearch(trackedSearch.id, CollectionTrigger.manual);
+  }
+
+  /**
+   * Reuses an in-process promise first, then PostgreSQL coordination for
+   * callers served by different API instances. It intentionally delegates all
+   * provider, matching, persistence and lifecycle work to this orchestrator.
+   */
+  async runOnDemand(query: string): Promise<CollectionExecutionResult> {
+    const trackedSearch = await this.trackedSearches.ensure(query);
+    const inFlight = this.inFlightOnDemandSearches.get(trackedSearch.id);
+    if (inFlight) return inFlight;
+    const execution = this.runOnDemandTrackedSearch(trackedSearch);
+    this.inFlightOnDemandSearches.set(trackedSearch.id, execution);
+    try {
+      return await execution;
+    } finally {
+      this.inFlightOnDemandSearches.delete(trackedSearch.id);
+    }
   }
 
   async runScheduled(): Promise<CollectionExecutionResult[]> {
@@ -86,8 +105,12 @@ export class CollectionOrchestrator {
     this.inFlightSearches.add(trackedSearch.id);
     try {
       const startedAt = new Date();
-      const run = await this.runs.start(trackedSearch.id, trackedSearch.query, trigger, startedAt);
-      return await this.executeSafely(run, trackedSearch);
+      const start = await this.runs.startOrFindRunning(trackedSearch.id, trackedSearch.query, trigger, startedAt);
+      if (!start.started) {
+        this.logger.info("collection.skipped_overlap", { trackedSearchId, query: trackedSearch.query, trigger });
+        return { status: "skipped_overlap" };
+      }
+      return await this.executeSafely(start.run, trackedSearch);
     } finally {
       this.inFlightSearches.delete(trackedSearch.id);
     }
@@ -117,6 +140,25 @@ export class CollectionOrchestrator {
     const recovered = await this.runs.recoverInterrupted(new Date(now.getTime() - this.staleRunMs), now);
     if (recovered) this.logger.info("collection.recovered_interrupted", { recovered });
     return recovered;
+  }
+
+  private async runOnDemandTrackedSearch(trackedSearch: TrackedSearch): Promise<CollectionExecutionResult> {
+    if (!trackedSearch.active) return { status: "skipped_inactive" };
+    const start = await this.runs.startOrFindRunning(trackedSearch.id, trackedSearch.query, CollectionTrigger.manual, new Date());
+    if (start.started) return this.executeSafely(start.run, trackedSearch);
+    return this.waitForRunningRun(start.run.id);
+  }
+
+  private async waitForRunningRun(runId: string): Promise<CollectionExecutionResult> {
+    const deadline = Date.now() + this.collectionTimeoutMs + 5_000;
+    let observed = await this.runs.findById(runId);
+    while (observed?.status === CollectionRunStatus.running && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      observed = await this.runs.findById(runId);
+    }
+    if (!observed || observed.status === CollectionRunStatus.running)
+      return { status: CollectionRunStatus.failed, collectionRun: observed ?? undefined };
+    return { status: observed.status, collectionRun: observed };
   }
 
   private async executeSafely(

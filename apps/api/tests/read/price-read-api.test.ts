@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { createReadApiServer } from "../../src/http/read-api.server.js";
 import { PriceHistoryService } from "../../src/read/price-history.service.js";
 import { ProductQueryService } from "../../src/read/product-query.service.js";
+import { ReadApiError } from "../../src/read/read-errors.js";
 import { createPrismaClient, type PrismaDatabase } from "../../src/infrastructure/database/prisma-client.js";
 
 const run = promisify(execFile);
@@ -61,7 +62,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.$executeRawUnsafe('TRUNCATE TABLE "PriceObservation", "TrackedSearchOffer", "ProviderCollectionRun", "CollectionRun", "Offer", "ProviderProduct", "CanonicalProduct", "TrackedSearch" RESTART IDENTITY CASCADE');
+  await db.$executeRawUnsafe('TRUNCATE TABLE "OnDemandRateLimit", "PriceObservation", "TrackedSearchOffer", "ProviderCollectionRun", "CollectionRun", "Offer", "ProviderProduct", "CanonicalProduct", "TrackedSearch" RESTART IDENTITY CASCADE');
 });
 
 async function seed() {
@@ -297,5 +298,29 @@ describe("PriceHistoryService e read API", () => {
       expect((await fetch(`${server.base}/offers/${amazon.id}/history?currency=brl`)).status).toBe(400);
       expect((await fetch(`${server.base}/offers/${amazon.id}/history?period=all`)).status).toBe(200);
     } finally { await server.close(); }
+  });
+
+  it("expõe rate limit on-demand sanitizado sem bloquear o contrato de leitura", async () => {
+    let clientAddress = "";
+    const server = createReadApiServer(db, {
+      corsOrigin: "http://localhost:3000",
+      onDemandTrustProxy: true,
+      onDemandSearch: {
+        async search(_query, _page, _limit, _currency, _sort, address) {
+          clientAddress = address;
+          throw new ReadApiError(429, "on_demand_rate_limited", "Limite temporário para novas coletas.", 600);
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Servidor indisponível.");
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/products?query=playstation%205`, { headers: { "X-Forwarded-For": "198.51.100.24, 10.0.0.1" } });
+      expect(response.status).toBe(429);
+      expect(response.headers.get("retry-after")).toBe("600");
+      expect(clientAddress).toBe("198.51.100.24");
+      expect(await response.json()).toEqual({ error: { code: "on_demand_rate_limited", message: "Limite temporário para novas coletas." } });
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 });

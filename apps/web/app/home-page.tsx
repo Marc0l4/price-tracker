@@ -8,7 +8,7 @@ import { searchProducts } from "@/lib/api/products";
 import type { ProductSearchSort } from "@/lib/types/api";
 
 function SearchSkeleton() {
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="Carregando resultados">{[1, 2, 3, 4].map((key) => <div className="surface flex overflow-hidden p-4 sm:block" key={key}><div className="skeleton aspect-square w-24 shrink-0 sm:w-full" /><div className="min-w-0 flex-1 pl-4 sm:pl-0"><div className="skeleton mt-1 h-5 w-4/5 sm:mt-5" /><div className="skeleton mt-3 h-4 w-1/2" /><div className="skeleton mt-5 h-7 w-2/5" /></div></div>)}</div>;
+  return <div aria-label="Carregando resultados"><p className="mb-4 text-center text-sm text-slate-600">Buscando preços e preparando resultados…</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{[1, 2, 3, 4].map((key) => <div className="surface flex overflow-hidden p-4 sm:block" key={key}><div className="skeleton aspect-square w-24 shrink-0 sm:w-full" /><div className="min-w-0 flex-1 pl-4 sm:pl-0"><div className="skeleton mt-1 h-5 w-4/5 sm:mt-5" /><div className="skeleton mt-3 h-4 w-1/2" /><div className="skeleton mt-5 h-7 w-2/5" /></div></div>)}</div></div>;
 }
 
 export function HomePage() {
@@ -69,13 +69,13 @@ export function HomePage() {
       <div className="page-shell mx-auto max-w-4xl text-center">
       <p className="eyebrow mb-4">Compare antes de decidir</p>
       <h1 className="text-balance text-4xl font-extrabold tracking-[-0.05em] text-brand-950 sm:text-5xl lg:text-6xl">Descubra se agora é um bom momento para comprar.</h1>
-      <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-7 text-slate-600 sm:text-lg">Consulte preços atuais e histórico do catálogo que o Price Tracker já acompanha.</p>
+      <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-7 text-slate-600 sm:text-lg">Consulte preços atuais e histórico. Para uma busca nova, os resultados podem levar alguns instantes para aparecer.</p>
       <form className="surface-raised mx-auto mt-8 flex max-w-2xl flex-col gap-2 p-2 sm:flex-row" onSubmit={submit}>
         <label className="sr-only" htmlFor="product-search">Buscar produto</label>
         <input id="product-search" value={query} onChange={(event) => update({ query: event.target.value })} placeholder="Busque por iPhone 15, Galaxy S24..." className="min-h-12 min-w-0 flex-1 rounded-xl bg-transparent px-4 text-base text-ink outline-none placeholder:text-slate-400" />
         <button type="submit" className="button-primary shrink-0" disabled={!query.trim() || loading}>{loading ? "Buscando…" : "Buscar"}</button>
       </form>
-      <p className="mt-3 text-xs text-slate-500">A busca consulta apenas produtos persistidos; não dispara uma coleta externa.</p>
+      <p className="mt-3 text-xs text-slate-500">Consultamos primeiro o catálogo histórico e atualizamos buscas novas quando a coleta sob demanda estiver disponível.</p>
       </div>
     </section>
 

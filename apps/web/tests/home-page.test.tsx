@@ -67,6 +67,16 @@ describe("busca de produtos", () => {
     expect(screen.queryByText(/sql detail/i)).not.toBeInTheDocument();
   });
 
+  it("mostra feedback de carregamento enquanto uma primeira busca está pendente", async () => {
+    let resolve!: (value: { page: number; limit: number; total: number; items: typeof product[] }) => void;
+    vi.mocked(searchProducts).mockReturnValue(new Promise((complete) => { resolve = complete; }));
+    renderHome();
+    submitSearch("playstation 5");
+    expect(screen.getByText(/buscando preços e preparando resultados/i)).toBeInTheDocument();
+    resolve({ page: 1, limit: 20, total: 1, items: [product] });
+    expect(await screen.findByText("iPhone")).toBeInTheDocument();
+  });
+
   it("preserva query, resultados, página e ordenação ao voltar do produto", async () => {
     vi.mocked(searchProducts)
       .mockResolvedValueOnce({ page: 1, limit: 20, total: 21, items: [product] })

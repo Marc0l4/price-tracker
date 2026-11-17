@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { PrismaClient } from "../generated/prisma/client.js";
 import { PriceHistoryService, type HistoryPeriod } from "../read/price-history.service.js";
 import { ProductQueryService } from "../read/product-query.service.js";
+import type { OnDemandProductSearchPort } from "../read/on-demand-product-search.service.js";
 import type { ProductSearchSort } from "../read/repositories/product-read.repository.js";
 import { ReadApiError } from "../read/read-errors.js";
 
@@ -14,9 +15,11 @@ const PRODUCT_SORTS = new Set<ProductSearchSort>(["history", "price"]);
 export interface ReadApiServerOptions {
   corsOrigin: string;
   version?: string;
+  onDemandSearch?: OnDemandProductSearchPort;
+  onDemandTrustProxy?: boolean;
 }
 
-function json(response: ServerResponse, status: number, body: unknown, corsOrigin: string): void {
+function json(response: ServerResponse, status: number, body: unknown, corsOrigin: string, retryAfterSeconds?: number): void {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": corsOrigin,
@@ -25,8 +28,19 @@ function json(response: ServerResponse, status: number, body: unknown, corsOrigi
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
+    ...(retryAfterSeconds ? { "Retry-After": String(retryAfterSeconds) } : {}),
   });
   response.end(JSON.stringify(body));
+}
+
+function clientAddress(request: IncomingMessage, trustProxy = false): string {
+  if (trustProxy) {
+    const forwarded = request.headers["x-forwarded-for"];
+    const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const first = value?.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return request.socket.remoteAddress ?? "unknown";
 }
 
 function requiredUuid(value: string): string {
@@ -100,8 +114,14 @@ export function createReadApiServer(db: PrismaClient, options: ReadApiServerOpti
       if (url.pathname === "/products") {
         const query = url.searchParams.get("query");
         if (!query?.trim()) throw new ReadApiError(400, "invalid_query", "Query é obrigatória.");
-        return json(response, 200, await products.search(query, positiveInt(url.searchParams.get("page"), 1, "page"),
-          positiveInt(url.searchParams.get("limit"), DEFAULT_LIMIT, "limit", MAX_LIMIT), currency(url.searchParams.get("currency")), productSort(url.searchParams.get("sort"))), options.corsOrigin);
+        const page = positiveInt(url.searchParams.get("page"), 1, "page");
+        const limit = positiveInt(url.searchParams.get("limit"), DEFAULT_LIMIT, "limit", MAX_LIMIT);
+        const selectedCurrency = currency(url.searchParams.get("currency"));
+        const sort = productSort(url.searchParams.get("sort"));
+        const result = options.onDemandSearch
+          ? await options.onDemandSearch.search(query, page, limit, selectedCurrency, sort, clientAddress(request, options.onDemandTrustProxy))
+          : await products.search(query, page, limit, selectedCurrency, sort);
+        return json(response, 200, result, options.corsOrigin);
       }
       if (parts[0] === "products" && parts.length >= 2) {
         const id = requiredUuid(parts[1]);
@@ -121,7 +141,7 @@ export function createReadApiServer(db: PrismaClient, options: ReadApiServerOpti
         return json(response, 200, await history.offerHistory(requiredUuid(parts[1]), currency(url.searchParams.get("currency")), historyOptions(url.searchParams)), options.corsOrigin);
       throw new ReadApiError(404, "route_not_found", "Rota não encontrada.");
     } catch (error) {
-      if (error instanceof ReadApiError) return json(response, error.status, { error: { code: error.code, message: error.message } }, options.corsOrigin);
+      if (error instanceof ReadApiError) return json(response, error.status, { error: { code: error.code, message: error.message } }, options.corsOrigin, error.retryAfterSeconds);
       return json(response, 500, { error: { code: "internal_error", message: "Erro interno ao consultar dados." } }, options.corsOrigin);
     }
   });

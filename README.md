@@ -12,13 +12,15 @@ contexto para responder: **o preço atual está baixo, normal ou alto?**
 Marketplaces expõem preços em formatos diferentes e mudam com frequência. O
 projeto adapta Amazon e Mercado Livre para um contrato comum, valida respostas,
 normaliza produtos e ofertas, relaciona produtos equivalentes com cautela e grava
-observações imutáveis de preço. A interface consulta somente o catálogo já
-persistido: buscar não aciona provedores externos.
+observações imutáveis de preço. A interface consulta primeiro o catálogo já
+persistido. Quando a coleta sob demanda estiver explicitamente habilitada, uma
+busca ainda não monitorada pode iniciar uma única coleta inicial e passar a
+reutilizar os dados persistidos nas buscas seguintes.
 
 ## Funcionalidades
 
 - Busca paginada no catálogo persistido, com ordenação global por cobertura de
-  histórico ou menor preço atual.
+  histórico ou menor preço atual e coleta inicial sob demanda opt-in.
 - Página de produto com preço atual, mínimo, máximo, média e classificação.
 - Histórico bruto ou agregado e ofertas ativas atuais.
 - Coleta manual e agendamento single-process opcional.
@@ -32,6 +34,7 @@ persistido: buscar não aciona provedores externos.
 flowchart TB
   Web[Next.js Web] --> ReadAPI[Read API]
   ReadAPI --> Postgres[(PostgreSQL)]
+  ReadAPI -. busca inédita / flag .-> Orchestrator
 
   CLI[CLI / Scheduler] --> Orchestrator[CollectionOrchestrator]
   Orchestrator --> Search[ProductSearchService]
@@ -99,6 +102,10 @@ do banco entre containers.
 | Backend privada | `CORS_ORIGIN` | Origem única liberada ao frontend. |
 | Backend privada | `COLLECTION_SCHEDULER_ENABLED` | Liga/desliga o scheduler single-process. |
 | Backend privada | `COLLECTION_INTERVAL_MINUTES`, `COLLECTION_TIMEOUT_MS`, `COLLECTION_STALE_RUN_MINUTES` | Limites da coleta. |
+| Backend privada | `ON_DEMAND_COLLECTION_ENABLED` | Feature flag da coleta sob demanda; padrão `false`. |
+| Backend privada | `ON_DEMAND_COLLECTION_TTL_MINUTES` | Tempo de reuso de uma coleta válida; padrão 360 minutos. |
+| Backend privada | `ON_DEMAND_RATE_LIMIT_MAX`, `ON_DEMAND_RATE_LIMIT_WINDOW_MINUTES` | Limite persistente por cliente para novas coletas; padrão 3 em 10 minutos. |
+| Backend privada | `ON_DEMAND_TRUST_PROXY` | Usa `X-Forwarded-For` somente atrás de proxy confiável, como Render. |
 | Frontend pública | `NEXT_PUBLIC_API_BASE_URL` | URL pública da API; é embutida no build web. |
 
 Não use `NEXT_PUBLIC_*` para banco, tokens ou chaves de providers. A API valida
@@ -185,6 +192,28 @@ normal usa o acesso estático e aponta a web `3000` para a API `3001`.
 
 ## Produção
 
+### Aplicação pública
+
+- Web: [price-tracker-web-ruddy.vercel.app](https://price-tracker-web-ruddy.vercel.app)
+- Read API: [price-tracker-api-vmhg.onrender.com](https://price-tracker-api-vmhg.onrender.com)
+
+A web é publicada na Vercel a partir de `apps/web`, com o **Root Directory**
+configurado como `apps/web`. A variável pública
+`NEXT_PUBLIC_API_BASE_URL` é definida no ambiente da Vercel e aponta para a
+Read API no Render; ela não deve ser gravada no código. O Render permite apenas
+a origem pública da Vercel por `CORS_ORIGIN` e a instância da API consulta o
+PostgreSQL hospedado no Neon.
+
+Para recriar o deploy na Vercel, importe o mesmo repositório com o preset
+**Next.js**, Node.js 22, Root Directory `apps/web`, o comando de instalação
+padrão da plataforma e o build `cd ../.. && npm run build --workspace=@price-tracker/web`.
+O diretório de saída permanece o padrão do Next.js.
+
+O plano gratuito do Render pode hibernar após inatividade. Nesse caso, a
+primeira busca pode demorar alguns segundos para acordar a API; o frontend
+mantém estados de carregamento e erro para esse cenário. A aplicação não faz
+coleta externa durante a navegação.
+
 A API é compilada para `apps/api/dist` e pode iniciar sem `vite-node`:
 
 ```bash
@@ -224,7 +253,8 @@ catálogo local — nunca arquivos `.env`, chaves ou URLs privadas.
 ## Limitações e roadmap
 
 - O scheduler não possui lock distribuído; use uma instância para coleta.
-- A busca lê apenas o catálogo existente; não coleta sob demanda.
+- A coleta sob demanda fica desligada por padrão e exige migration, chave Scavio e
+  configuração explícita no ambiente antes de ser usada em produção.
 - Não há autenticação, favoritos, alertas ou notificações neste MVP.
 - O próximo passo de infraestrutura é escolher hospedagem e configurar secrets
   no provedor, sem expor `.env.production`.

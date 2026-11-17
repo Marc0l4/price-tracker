@@ -21,6 +21,12 @@ export class TrackedSearchRepository {
     return this.db.trackedSearch.findUnique({ where: { id } });
   }
 
+  findByQuery(query: string) {
+    const normalized = normalizeTrackedQuery(query);
+    if (!normalized) return Promise.resolve(null);
+    return this.db.trackedSearch.findUnique({ where: { query: normalized } });
+  }
+
   findActive() {
     return this.db.trackedSearch.findMany({ where: { active: true }, orderBy: { createdAt: "asc" } });
   }

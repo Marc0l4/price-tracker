@@ -15,6 +15,11 @@ export interface ReadApiEnvironment {
   apiPort: number;
   corsOrigin: string;
   schedulerEnabled: boolean;
+  onDemandCollectionEnabled: boolean;
+  onDemandCollectionTtlMs: number;
+  onDemandRateLimitMax: number;
+  onDemandRateLimitWindowMs: number;
+  onDemandTrustProxy: boolean;
 }
 
 export interface CollectionEnvironment {
@@ -46,10 +51,21 @@ function booleanFromEnvironment(name: string, value: string | undefined, fallbac
 }
 
 export function readApiEnvironmentFromEnvironment(environment = process.env): ReadApiEnvironment {
+  const minute = 60_000;
   const databaseUrl = parseOrThrow(postgresUrl, "DATABASE_URL", requiredString("DATABASE_URL", environment.DATABASE_URL));
   const apiPort = parseOrThrow(positiveInteger.max(65_535), "PORT", environment.PORT ?? environment.API_PORT ?? environment.READ_API_PORT ?? "3001");
   const corsOrigin = new URL(parseOrThrow(httpUrl, "CORS_ORIGIN", environment.CORS_ORIGIN ?? environment.WEB_ORIGIN ?? "http://localhost:3000")).origin;
-  return { databaseUrl, apiPort, corsOrigin, schedulerEnabled: booleanFromEnvironment("COLLECTION_SCHEDULER_ENABLED", environment.COLLECTION_SCHEDULER_ENABLED, false) };
+  return {
+    databaseUrl,
+    apiPort,
+    corsOrigin,
+    schedulerEnabled: booleanFromEnvironment("COLLECTION_SCHEDULER_ENABLED", environment.COLLECTION_SCHEDULER_ENABLED, false),
+    onDemandCollectionEnabled: booleanFromEnvironment("ON_DEMAND_COLLECTION_ENABLED", environment.ON_DEMAND_COLLECTION_ENABLED, false),
+    onDemandCollectionTtlMs: parseOrThrow(positiveInteger, "ON_DEMAND_COLLECTION_TTL_MINUTES", environment.ON_DEMAND_COLLECTION_TTL_MINUTES ?? "360") * minute,
+    onDemandRateLimitMax: parseOrThrow(positiveInteger, "ON_DEMAND_RATE_LIMIT_MAX", environment.ON_DEMAND_RATE_LIMIT_MAX ?? "3"),
+    onDemandRateLimitWindowMs: parseOrThrow(positiveInteger, "ON_DEMAND_RATE_LIMIT_WINDOW_MINUTES", environment.ON_DEMAND_RATE_LIMIT_WINDOW_MINUTES ?? "10") * minute,
+    onDemandTrustProxy: booleanFromEnvironment("ON_DEMAND_TRUST_PROXY", environment.ON_DEMAND_TRUST_PROXY, false),
+  };
 }
 
 export function collectionEnvironmentFromEnvironment(environment = process.env): CollectionEnvironment {

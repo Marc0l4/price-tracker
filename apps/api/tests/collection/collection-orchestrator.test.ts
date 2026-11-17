@@ -12,6 +12,7 @@ import { CollectionScheduler } from "../../src/collection/collection-scheduler.j
 import { noopCollectionLogger } from "../../src/collection/collection-logger.js";
 import type { CollectionSearchPort } from "../../src/collection/collection-contracts.js";
 import { ProductPersistenceService } from "../../src/persistence/product-persistence.service.js";
+import { OnDemandProductSearchService } from "../../src/read/on-demand-product-search.service.js";
 import type { DetailedSearchResult, ProviderSearchOutcome } from "../../src/services/product-search.service.js";
 import type { NormalizedProduct, ProviderSearchError } from "../../src/types/normalized-product.js";
 import { createPrismaClient, type PrismaDatabase } from "../../src/infrastructure/database/prisma-client.js";
@@ -78,7 +79,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.$executeRawUnsafe('TRUNCATE TABLE "PriceObservation", "TrackedSearchOffer", "ProviderCollectionRun", "CollectionRun", "Offer", "ProviderProduct", "CanonicalProduct", "TrackedSearch" RESTART IDENTITY CASCADE');
+  await db.$executeRawUnsafe('TRUNCATE TABLE "OnDemandRateLimit", "PriceObservation", "TrackedSearchOffer", "ProviderCollectionRun", "CollectionRun", "Offer", "ProviderProduct", "CanonicalProduct", "TrackedSearch" RESTART IDENTITY CASCADE');
 });
 
 type ProviderPlan = { products?: NormalizedProduct[]; errorCode?: ProviderSearchError["code"]; delayMs?: number };
@@ -90,6 +91,8 @@ class PlannedSearch implements CollectionSearchPort {
   constructor(private readonly plans: Array<Record<string, ProviderPlan>>, providers = ["amazon", "mercadolivre"]) {
     this.providerNames = providers;
   }
+
+  get callCount() { return this.call; }
 
   async searchDetailed(_query: string): Promise<DetailedSearchResult> {
     const plan = this.plans[Math.min(this.call++, this.plans.length - 1)] ?? {};
@@ -134,6 +137,17 @@ function createOrchestrator(search: CollectionSearchPort, timeoutMs = 30_000) {
     noopCollectionLogger,
     { collectionTimeoutMs: timeoutMs, staleRunMs: 1_000 },
   );
+}
+
+function createOnDemandSearch(search: CollectionSearchPort, options: Partial<{
+  enabled: boolean; ttlMs: number; rateLimitMax: number; rateLimitWindowMs: number; now: () => Date;
+}> = {}) {
+  return new OnDemandProductSearchService(db, createOrchestrator(search), {
+    enabled: options.enabled ?? true,
+    ttlMs: options.ttlMs ?? 6 * 60 * 60 * 1_000,
+    rateLimitMax: options.rateLimitMax ?? 3,
+    rateLimitWindowMs: options.rateLimitWindowMs ?? 10 * 60 * 1_000,
+  }, undefined, options.now ?? (() => new Date()));
 }
 
 async function createTracked(query: string, active = true) {
@@ -330,6 +344,98 @@ describe("CollectionOrchestrator", () => {
     expect(recovered).toBe(1);
     expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "failed", errorCode: "interrupted" });
     expect(await db.providerCollectionRun.findFirstOrThrow()).toMatchObject({ status: "failed", errorCode: "interrupted" });
+  });
+});
+
+describe("OnDemandProductSearchService", () => {
+  const playstation = (provider = "amazon", externalId = "PS5") => {
+    const item = product(provider, externalId, 3499, `${externalId}-offer`);
+    item.name = "PlayStation 5 Slim Digital";
+    return item;
+  };
+
+  it("reutiliza catálogo de uma coleta recente sem chamar providers ou criar outra run", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { products: [] } }]);
+    const onDemand = createOnDemandSearch(planned);
+    const first = await onDemand.search("PlayStation 5", 1, 20, "BRL", "history", "198.51.100.1");
+    const runsBefore = await db.collectionRun.count();
+    const second = await onDemand.search("playstation     5", 1, 20, "BRL", "history", "198.51.100.1");
+    expect(first.total).toBe(1);
+    expect(second.total).toBe(1);
+    expect(planned.callCount).toBe(1);
+    expect(await db.collectionRun.count()).toBe(runsBefore);
+  });
+
+  it("coleta uma query inédita, normaliza a TrackedSearch e devolve a leitura persistida", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { products: [] } }]);
+    const result = await createOnDemandSearch(planned).search("  PlayStation   5  ", 1, 20, "BRL", "history", "198.51.100.2");
+    expect(result).toMatchObject({ total: 1, items: [{ name: "PlayStation 5 Slim Digital" }] });
+    expect(planned.callCount).toBe(1);
+    expect(await db.trackedSearch.findMany()).toMatchObject([{ query: "playstation 5" }]);
+    expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "completed", productsReceived: 1 });
+  });
+
+  it("permite refresh quando o TTL expirou", async () => {
+    const planned = new PlannedSearch([
+      { amazon: { products: [playstation()] }, mercadolivre: { products: [] } },
+      { amazon: { products: [playstation()] }, mercadolivre: { products: [] } },
+    ]);
+    let clock = new Date();
+    const onDemand = createOnDemandSearch(planned, { ttlMs: 60_000, now: () => clock });
+    await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.3");
+    clock = new Date(Date.now() + 61_000);
+    await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.3");
+    expect(planned.callCount).toBe(2);
+    expect(await db.collectionRun.count()).toBe(2);
+  });
+
+  it("coordena duas instâncias para a mesma query e executa providers uma única vez", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()], delayMs: 50 }, mercadolivre: { products: [], delayMs: 50 } }]);
+    const first = createOnDemandSearch(planned);
+    const second = createOnDemandSearch(planned);
+    const [a, b] = await Promise.all([
+      first.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.4"),
+      second.search("PlayStation  5", 1, 20, "BRL", "history", "198.51.100.5"),
+    ]);
+    expect(a.total).toBe(1);
+    expect(b.total).toBe(1);
+    expect(planned.callCount).toBe(1);
+    expect(await db.collectionRun.count()).toBe(1);
+  });
+
+  it("preserva resultado parcial e continua retornando o provider que funcionou", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { errorCode: "timeout" } }]);
+    const result = await createOnDemandSearch(planned).search("playstation 5", 1, 20, "BRL", "history", "198.51.100.6");
+    expect(result.total).toBe(1);
+    expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "partial" });
+    expect(await db.providerCollectionRun.findFirstOrThrow({ where: { provider: "mercadolivre" } })).toMatchObject({ status: "failed", errorCode: "timeout" });
+  });
+
+  it("falha de todos providers mantém a run controlada e permite nova tentativa", async () => {
+    const planned = new PlannedSearch([{ amazon: { errorCode: "network_error" }, mercadolivre: { errorCode: "timeout" } }]);
+    const onDemand = createOnDemandSearch(planned);
+    await expect(onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.7"))
+      .rejects.toMatchObject({ status: 502, code: "on_demand_collection_failed" });
+    expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "failed", errorCode: "all_providers_failed" });
+    expect((await db.trackedSearch.findFirstOrThrow()).lastCollectedAt).toBeNull();
+  });
+
+  it("limita somente novas coletas e não bloqueia uma leitura recente", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { products: [] } }]);
+    const onDemand = createOnDemandSearch(planned, { rateLimitMax: 1 });
+    await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.8");
+    await expect(onDemand.search("galaxy s24", 1, 20, "BRL", "history", "198.51.100.8"))
+      .rejects.toMatchObject({ status: 429, code: "on_demand_rate_limited" });
+    await expect(onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.8")).resolves.toMatchObject({ total: 1 });
+    expect(planned.callCount).toBe(1);
+  });
+
+  it("mantém a API somente leitura quando a feature flag está desligada", async () => {
+    const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { products: [] } }]);
+    const result = await createOnDemandSearch(planned, { enabled: false }).search("playstation 5", 1, 20, "BRL", "history", "198.51.100.9");
+    expect(result).toMatchObject({ total: 0, items: [] });
+    expect(planned.callCount).toBe(0);
+    expect(await db.trackedSearch.count()).toBe(0);
   });
 });
 
