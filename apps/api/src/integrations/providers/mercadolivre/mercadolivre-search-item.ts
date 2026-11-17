@@ -15,5 +15,5 @@ export interface MercadoLivreSearchItem {
 }
 
 export interface MercadoLivreSearchClient {
-  search(query: string): Promise<MercadoLivreSearchItem[]>;
+  search(query: string, signal?: AbortSignal): Promise<MercadoLivreSearchItem[]>;
 }

@@ -316,11 +316,14 @@ O fluxo é:
    `TrackedSearch` e seu `lastCollectedAt` antes de decidir por uma coleta;
 5. dentro de `ON_DEMAND_COLLECTION_TTL_MINUTES` (default 360), a resposta vem
    somente do banco, inclusive quando o resultado válido é vazio;
-6. query inédita, falha anterior ou TTL expirado podem usar o
+6. query inédita sem dados, falha anterior ou TTL expirado podem usar o
    `CollectionOrchestrator`, que persiste e depois relê o catálogo;
 7. `lastCollectedAt` só é atualizado quando não houve falha de persistência;
    uma execução parcial por persistência permanece elegível para retry;
-8. a ordenação global ocorre no PostgreSQL antes de `OFFSET/LIMIT`, e a Web
+8. uma query expirada que já possui produtos retorna o catálogo stale
+   imediatamente e inicia um refresh best-effort no processo, protegido pelo
+   mesmo advisory lock; Render Free pode interromper esse refresh após a resposta;
+9. a ordenação global ocorre no PostgreSQL antes de `OFFSET/LIMIT`, e a Web
    recebe Decimal como string com quatro casas.
 
 Produto sem histórico pode aparecer no catálogo se sua identidade existir; nesse
@@ -346,6 +349,14 @@ sanitizado; sucesso parcial preserva os resultados persistidos do provider que
 funcionou. As janelas antigas expiram logicamente, mas seus contadores ainda
 permanecem na tabela; uma política de retenção/cleanup é dívida operacional
 futura, fora do caminho de requisição.
+
+Para a primeira query sem catálogo, `ON_DEMAND_COLLECTION_BUDGET_MS` limita a
+espera interativa a 30 segundos por padrão. Providers continuam iniciando pelo
+mesmo contrato e limiter Scavio, mas o resultado já concluído é persistido como
+parcial se outro provider exceder o budget. Os limites individuais default são
+15 segundos para Amazon e 12 segundos para Mercado Livre. Logs estruturados
+`on_demand_search.timing` e `collection.timing` registram tempos, cache state,
+providers, matching, persistência e budget sem IP ou segredo.
 
 O frontend mantém query, página, sort e resultados em memória no
 `SearchStateProvider`. A URL não é usada como fonte persistente de busca; ao

@@ -5,7 +5,7 @@ import type { AmazonSearchItem } from "./amazon-search-item.js";
 import { ScavioAmazonClient } from "./clients/scavio-amazon.client.js";
 
 export interface AmazonSearchClient {
-  search(query: string): Promise<AmazonSearchItem[]>;
+  search(query: string, signal?: AbortSignal): Promise<AmazonSearchItem[]>;
 }
 
 export class AmazonProvider implements ProductProvider {
@@ -13,8 +13,8 @@ export class AmazonProvider implements ProductProvider {
 
   constructor(private readonly client: AmazonSearchClient = new ScavioAmazonClient()) {}
 
-  async searchProducts(query: string): Promise<NormalizedProduct[]> {
-    const items = await this.client.search(query);
+  async searchProducts(query: string, signal?: AbortSignal): Promise<NormalizedProduct[]> {
+    const items = await this.client.search(query, signal);
     return items.map(mapAmazonItem);
   }
 }

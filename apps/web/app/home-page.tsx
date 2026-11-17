@@ -7,6 +7,8 @@ import { useSearchState } from "@/app/search-state-provider";
 import { searchProducts } from "@/lib/api/products";
 import type { ProductSearchSort } from "@/lib/types/api";
 
+const SEARCH_REQUEST_TIMEOUT_MS = 40_000;
+
 function SearchSkeleton() {
   return <div aria-label="Carregando resultados"><p className="mb-4 text-center text-sm text-slate-600">Buscando preços e preparando resultados…</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{[1, 2, 3, 4].map((key) => <div className="surface flex overflow-hidden p-4 sm:block" key={key}><div className="skeleton aspect-square w-24 shrink-0 sm:w-full" /><div className="min-w-0 flex-1 pl-4 sm:pl-0"><div className="skeleton mt-1 h-5 w-4/5 sm:mt-5" /><div className="skeleton mt-3 h-4 w-1/2" /><div className="skeleton mt-5 h-7 w-2/5" /></div></div>)}</div></div>;
 }
@@ -30,7 +32,9 @@ export function HomePage() {
     if (!activeQuery) { update({ result: null }); setError(null); setLoading(false); return; }
     if (restoredSearch.current) { restoredSearch.current = false; return; }
     setLoading(true); setError(null);
-    searchProducts(activeQuery, page, sort).then((data) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SEARCH_REQUEST_TIMEOUT_MS);
+    searchProducts(activeQuery, page, sort, controller.signal).then((data) => {
       if (!active) return;
       update({ result: data });
       if (paginationScrollPending.current) {
@@ -44,7 +48,7 @@ export function HomePage() {
     })
       .catch(() => { if (active) setError("Não foi possível carregar os dados agora."); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [activeQuery, page, requestVersion, sort, update]);
 
   function submit(event: FormEvent<HTMLFormElement>) {

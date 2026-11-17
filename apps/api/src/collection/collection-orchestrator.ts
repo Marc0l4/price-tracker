@@ -8,10 +8,12 @@ import { StructuredCollectionLogger } from "./collection-logger.js";
 
 export interface CollectionOrchestratorOptions {
   collectionTimeoutMs?: number;
+  onDemandCollectionBudgetMs?: number;
   staleRunMs?: number;
 }
 
 const DEFAULT_COLLECTION_TIMEOUT_MS = 30_000;
+const DEFAULT_ON_DEMAND_COLLECTION_BUDGET_MS = 30_000;
 const DEFAULT_STALE_RUN_MS = 60 * 60 * 1_000;
 
 function safeTimeout(value: number | undefined, fallback: number): number {
@@ -40,6 +42,7 @@ export class CollectionOrchestrator {
   private readonly runs: CollectionRunRepository;
   private readonly inFlightSearches = new Set<string>();
   private readonly collectionTimeoutMs: number;
+  private readonly onDemandCollectionBudgetMs: number;
   private readonly staleRunMs: number;
 
   constructor(
@@ -53,6 +56,7 @@ export class CollectionOrchestrator {
     this.trackedSearches = new TrackedSearchRepository(db);
     this.runs = new CollectionRunRepository(db);
     this.collectionTimeoutMs = safeTimeout(options.collectionTimeoutMs, DEFAULT_COLLECTION_TIMEOUT_MS);
+    this.onDemandCollectionBudgetMs = safeTimeout(options.onDemandCollectionBudgetMs, DEFAULT_ON_DEMAND_COLLECTION_BUDGET_MS);
     this.staleRunMs = safeTimeout(options.staleRunMs, DEFAULT_STALE_RUN_MS);
   }
 
@@ -137,12 +141,12 @@ export class CollectionOrchestrator {
     if (!trackedSearch.active) return { status: "skipped_inactive" };
     const start = await this.runs.startOrFindRunning(trackedSearch.id, trackedSearch.query, CollectionTrigger.manual, new Date(), admission);
     if ("denied" in start) return { status: "rate_limited" };
-    if (start.started) return this.executeSafely(start.run, trackedSearch);
-    return this.waitForRunningRun(start.run.id);
+    if (start.started) return this.executeSafely(start.run, trackedSearch, this.onDemandCollectionBudgetMs);
+    return this.waitForRunningRun(start.run.id, this.onDemandCollectionBudgetMs);
   }
 
-  private async waitForRunningRun(runId: string): Promise<CollectionExecutionResult> {
-    const deadline = Date.now() + this.collectionTimeoutMs + 5_000;
+  private async waitForRunningRun(runId: string, timeoutMs = this.collectionTimeoutMs): Promise<CollectionExecutionResult> {
+    const deadline = Date.now() + timeoutMs + 5_000;
     let observed = await this.runs.findById(runId);
     while (observed?.status === CollectionRunStatus.running && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 100));
@@ -156,9 +160,10 @@ export class CollectionOrchestrator {
   private async executeSafely(
     run: { id: string; collectionKey: string; attempt: number; startedAt: Date; attemptStartedAt: Date },
     trackedSearch: TrackedSearch,
+    timeoutMs = this.collectionTimeoutMs,
   ): Promise<CollectionExecutionResult> {
     try {
-      return await this.execute(run, trackedSearch);
+      return await this.execute(run, trackedSearch, timeoutMs);
     } catch {
       const finished = await this.runs.failUnexpected(run.id, run.attempt, run.attemptStartedAt, new Date(), "orchestrator_error");
       this.logger.info("collection.failed", { collectionRunId: run.id, query: trackedSearch.query, status: "failed", stage: "orchestrator", code: "orchestrator_error" });
@@ -166,7 +171,8 @@ export class CollectionOrchestrator {
     }
   }
 
-  private async execute(run: { id: string; collectionKey: string; attempt: number; startedAt: Date; attemptStartedAt: Date }, trackedSearch: TrackedSearch): Promise<CollectionExecutionResult> {
+  private async execute(run: { id: string; collectionKey: string; attempt: number; startedAt: Date; attemptStartedAt: Date }, trackedSearch: TrackedSearch, timeoutMs: number): Promise<CollectionExecutionResult> {
+    const collectionStartedMs = Date.now();
     const providers = this.search.providerNames;
     await this.runs.createProviderRuns(run.id, run.attempt, providers, run.attemptStartedAt);
     this.logger.info("collection.providers_started", {
@@ -179,7 +185,7 @@ export class CollectionOrchestrator {
 
     let detailed;
     try {
-      detailed = await withTimeout(this.search.searchDetailed(trackedSearch.query), this.collectionTimeoutMs);
+      detailed = await withTimeout(this.search.searchDetailed(trackedSearch.query, { budgetMs: timeoutMs }), timeoutMs);
     } catch {
       detailed = undefined;
     }
@@ -210,13 +216,16 @@ export class CollectionOrchestrator {
       }
     }
 
+    const matchingStartedMs = Date.now();
     const successfulProviders = detailed.providers.filter((provider) => provider.status === "success");
     const sourcedProducts: SourcedProduct[] = successfulProviders.flatMap((provider) =>
       provider.products.map((product) => ({ provider: provider.provider, product })));
     const matchedGroupCount = this.matching.group(sourcedProducts.map(({ product }) => product)).length;
+    const matchingDurationMs = Date.now() - matchingStartedMs;
     let persistedGroupCount = 0;
     let failedGroupCount = 0;
     let persistenceFailed = false;
+    const persistenceStartedMs = Date.now();
     try {
       const persisted = await this.persistence.persist(sourcedProducts, {
         collectionKey: run.collectionKey,
@@ -232,6 +241,7 @@ export class CollectionOrchestrator {
       persistenceFailed = true;
       failedGroupCount = Math.max(1, matchedGroupCount);
     }
+    const persistenceDurationMs = Date.now() - persistenceStartedMs;
 
     const finishedAt = new Date();
     const hasProviderFailure = successfulProviders.length !== detailed.providers.length;
@@ -256,6 +266,17 @@ export class CollectionOrchestrator {
       productsReceived: sourcedProducts.length,
       persistedGroupCount,
       failedGroupCount,
+    });
+    this.logger.info("collection.timing", {
+      collectionRunId: run.id,
+      query: trackedSearch.query,
+      amazonMs: detailed.providers.find((provider) => provider.provider === "amazon")?.durationMs,
+      mercadoLivreMs: detailed.providers.find((provider) => provider.provider === "mercadolivre")?.durationMs,
+      matchingMs: matchingDurationMs,
+      persistenceMs: persistenceDurationMs,
+      totalMs: Date.now() - collectionStartedMs,
+      partial: status === CollectionRunStatus.partial,
+      budgetExhausted: detailed.providers.some((provider) => provider.error?.code === "timeout" && provider.durationMs >= timeoutMs),
     });
     return { status, collectionRun: finished };
   }

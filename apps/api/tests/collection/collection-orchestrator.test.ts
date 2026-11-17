@@ -13,6 +13,9 @@ import { noopCollectionLogger } from "../../src/collection/collection-logger.js"
 import type { CollectionSearchPort } from "../../src/collection/collection-contracts.js";
 import { ProductPersistenceService } from "../../src/persistence/product-persistence.service.js";
 import { OnDemandProductSearchService } from "../../src/read/on-demand-product-search.service.js";
+import { ProductSearchService } from "../../src/services/product-search.service.js";
+import type { ProductProvider } from "../../src/integrations/contracts/product-provider.js";
+import { ProviderError } from "../../src/shared/errors/provider-error.js";
 import type { DetailedSearchResult, ProviderSearchOutcome } from "../../src/services/product-search.service.js";
 import type { NormalizedProduct, ProviderSearchError } from "../../src/types/normalized-product.js";
 import { createPrismaClient, type PrismaDatabase } from "../../src/infrastructure/database/prisma-client.js";
@@ -128,26 +131,33 @@ function product(provider: string, externalId: string, price = 100, offerId = `$
   };
 }
 
-function createOrchestrator(search: CollectionSearchPort, timeoutMs = 30_000) {
+function createOrchestrator(search: CollectionSearchPort, timeoutMs = 30_000, onDemandBudgetMs = timeoutMs) {
   return new CollectionOrchestrator(
     db,
     search,
     new ProductPersistenceService(db),
     undefined,
     noopCollectionLogger,
-    { collectionTimeoutMs: timeoutMs, staleRunMs: 1_000 },
+    { collectionTimeoutMs: timeoutMs, onDemandCollectionBudgetMs: onDemandBudgetMs, staleRunMs: 1_000 },
   );
 }
 
 function createOnDemandSearch(search: CollectionSearchPort, options: Partial<{
   enabled: boolean; ttlMs: number; rateLimitMax: number; rateLimitWindowMs: number; now: () => Date;
+  onDemandBudgetMs: number;
 }> = {}) {
-  return new OnDemandProductSearchService(db, createOrchestrator(search), {
+  return new OnDemandProductSearchService(db, createOrchestrator(search, 30_000, options.onDemandBudgetMs ?? 30_000), {
     enabled: options.enabled ?? true,
     ttlMs: options.ttlMs ?? 6 * 60 * 60 * 1_000,
     rateLimitMax: options.rateLimitMax ?? 3,
     rateLimitWindowMs: options.rateLimitWindowMs ?? 10 * 60 * 1_000,
   }, undefined, options.now ?? (() => new Date()));
+}
+
+async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!await condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(await condition()).toBe(true);
 }
 
 async function createTracked(query: string, active = true) {
@@ -386,7 +396,26 @@ describe("OnDemandProductSearchService", () => {
     await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.3");
     clock = new Date(Date.now() + 61_000);
     await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.3");
-    expect(planned.callCount).toBe(2);
+    await waitFor(() => planned.callCount === 2);
+    await waitFor(async () => await db.collectionRun.count() === 2);
+    await waitFor(async () => (await db.collectionRun.findFirstOrThrow({ orderBy: { startedAt: "desc" } })).status !== "running");
+  });
+
+  it("retorna dados stale sem esperar refresh expirado e inicia uma unica coleta", async () => {
+    const planned = new PlannedSearch([
+      { amazon: { products: [playstation()] }, mercadolivre: { products: [] } },
+      { amazon: { products: [playstation()], delayMs: 100 }, mercadolivre: { products: [], delayMs: 100 } },
+    ]);
+    let clock = new Date();
+    const onDemand = createOnDemandSearch(planned, { ttlMs: 1, now: () => clock });
+    await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.30");
+    clock = new Date(Date.now() + 1_000);
+    const startedAt = Date.now();
+    const stale = await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.30");
+    expect(Date.now() - startedAt).toBeLessThan(80);
+    expect(stale.total).toBe(1);
+    await waitFor(() => planned.callCount === 2);
+    await waitFor(async () => (await db.collectionRun.findFirstOrThrow({ orderBy: { startedAt: "desc" } })).status !== "running");
     expect(await db.collectionRun.count()).toBe(2);
   });
 
@@ -408,6 +437,24 @@ describe("OnDemandProductSearchService", () => {
   it("preserva resultado parcial e continua retornando o provider que funcionou", async () => {
     const planned = new PlannedSearch([{ amazon: { products: [playstation()] }, mercadolivre: { errorCode: "timeout" } }]);
     const result = await createOnDemandSearch(planned).search("playstation 5", 1, 20, "BRL", "history", "198.51.100.6");
+    expect(result.total).toBe(1);
+    expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "partial" });
+    expect(await db.providerCollectionRun.findFirstOrThrow({ where: { provider: "mercadolivre" } })).toMatchObject({ status: "failed", errorCode: "timeout" });
+  });
+
+  it("persiste provider rapido quando o budget encerra o provider lento", async () => {
+    const fast: ProductProvider = { name: "amazon", searchProducts: async () => [playstation()] };
+    const slow: ProductProvider = {
+      name: "mercadolivre",
+      searchProducts: async (_query, signal) => new Promise((_, reject) =>
+        signal?.addEventListener("abort", () => reject(new ProviderError("mercadolivre", "timeout", "Budget.")), { once: true })),
+    };
+    const productSearch = new ProductSearchService([fast, slow]);
+    const search: CollectionSearchPort = { providerNames: productSearch.providerNames, searchDetailed: (query, options) => productSearch.searchDetailed(query, options) };
+    const onDemand = new OnDemandProductSearchService(db, createOrchestrator(search, 30_000, 25), {
+      enabled: true, ttlMs: 60_000, rateLimitMax: 3, rateLimitWindowMs: 600_000,
+    });
+    const result = await onDemand.search("playstation 5", 1, 20, "BRL", "history", "198.51.100.31");
     expect(result.total).toBe(1);
     expect(await db.collectionRun.findFirstOrThrow()).toMatchObject({ status: "partial" });
     expect(await db.providerCollectionRun.findFirstOrThrow({ where: { provider: "mercadolivre" } })).toMatchObject({ status: "failed", errorCode: "timeout" });

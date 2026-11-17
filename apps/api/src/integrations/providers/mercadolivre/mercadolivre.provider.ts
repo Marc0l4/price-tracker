@@ -9,7 +9,7 @@ export class MercadoLivreProvider implements ProductProvider {
 
   constructor(private readonly client: MercadoLivreSearchClient = new ScavioMercadoLivreClient()) {}
 
-  async searchProducts(query: string): Promise<NormalizedProduct[]> {
-    return (await this.client.search(query)).map(mapMercadoLivreSearchItem);
+  async searchProducts(query: string, signal?: AbortSignal): Promise<NormalizedProduct[]> {
+    return (await this.client.search(query, signal)).map(mapMercadoLivreSearchItem);
   }
 }

@@ -23,3 +23,7 @@ export function staleRunMsFromEnvironment(): number {
 export function scavioAmazonTimeoutMsFromEnvironment(): number {
   return positiveEnvironmentNumber("SCAVIO_AMAZON_TIMEOUT_MS", 15_000);
 }
+
+export function scavioMercadoLivreTimeoutMsFromEnvironment(): number {
+  return positiveEnvironmentNumber("SCAVIO_MERCADOLIVRE_TIMEOUT_MS", 12_000);
+}

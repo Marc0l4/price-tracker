@@ -25,6 +25,8 @@ export interface ReadApiEnvironment {
 export interface CollectionEnvironment {
   scavioApiKey: string;
   scavioAmazonTimeoutMs: number;
+  scavioMercadoLivreTimeoutMs: number;
+  onDemandCollectionBudgetMs: number;
   collectionIntervalMs: number;
   collectionTimeoutMs: number;
   staleRunMs: number;
@@ -73,6 +75,8 @@ export function collectionEnvironmentFromEnvironment(environment = process.env):
   return {
     scavioApiKey: requiredString("SCAVIO_API_KEY", environment.SCAVIO_API_KEY),
     scavioAmazonTimeoutMs: parseOrThrow(positiveInteger, "SCAVIO_AMAZON_TIMEOUT_MS", environment.SCAVIO_AMAZON_TIMEOUT_MS ?? "15000"),
+    scavioMercadoLivreTimeoutMs: parseOrThrow(positiveInteger, "SCAVIO_MERCADOLIVRE_TIMEOUT_MS", environment.SCAVIO_MERCADOLIVRE_TIMEOUT_MS ?? "12000"),
+    onDemandCollectionBudgetMs: parseOrThrow(positiveInteger, "ON_DEMAND_COLLECTION_BUDGET_MS", environment.ON_DEMAND_COLLECTION_BUDGET_MS ?? "30000"),
     collectionIntervalMs: parseOrThrow(positiveInteger, "COLLECTION_INTERVAL_MINUTES", environment.COLLECTION_INTERVAL_MINUTES ?? "30") * minute,
     collectionTimeoutMs: parseOrThrow(positiveInteger, "COLLECTION_TIMEOUT_MS", environment.COLLECTION_TIMEOUT_MS ?? "30000"),
     staleRunMs: parseOrThrow(positiveInteger, "COLLECTION_STALE_RUN_MINUTES", environment.COLLECTION_STALE_RUN_MINUTES ?? "60") * minute,

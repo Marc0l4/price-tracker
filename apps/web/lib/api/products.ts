@@ -7,7 +7,7 @@ const params = (input: Record<string, string | number | undefined>) => {
   return search.toString();
 };
 
-export const searchProducts = (query: string, page = 1, sort: ProductSearchSort = "history") => apiGet<ProductSearchResponse>(`/products?${params({ query, page, limit: 20, sort })}`);
+export const searchProducts = (query: string, page = 1, sort: ProductSearchSort = "history", signal?: AbortSignal) => apiGet<ProductSearchResponse>(`/products?${params({ query, page, limit: 20, sort })}`, signal);
 export const getProduct = (id: string) => apiGet<ProductDetail>(`/products/${encodeURIComponent(id)}`);
 export const getOffers = (id: string) => apiGet<OffersResponse>(`/products/${encodeURIComponent(id)}/offers`);
 export const getAnalytics = (id: string, period: HistoryPeriod) => apiGet<Analytics>(`/products/${encodeURIComponent(id)}/analytics?${params({ period })}`);

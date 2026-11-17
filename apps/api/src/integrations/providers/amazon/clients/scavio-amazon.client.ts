@@ -23,7 +23,7 @@ export class ScavioAmazonClient implements AmazonSearchClient {
     private readonly timeoutMs = scavioAmazonTimeoutMsFromEnvironment(),
   ) {}
 
-  async search(query: string): Promise<AmazonSearchItem[]> {
+  async search(query: string, signal?: AbortSignal): Promise<AmazonSearchItem[]> {
     if (!this.apiKey?.trim()) {
       throw new ProviderError("amazon", "configuration_error", "SCAVIO_API_KEY não configurada.");
     }
@@ -31,6 +31,8 @@ export class ScavioAmazonClient implements AmazonSearchClient {
     return scavioRequestLimiter.run(this.apiKey, async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
     try {
       const response = await this.fetchFn("https://api.scavio.dev/api/v1/amazon/search", {
         method: "POST",
@@ -60,7 +62,8 @@ export class ScavioAmazonClient implements AmazonSearchClient {
       throw new ProviderError("amazon", "network_error", "Não foi possível consultar a busca Amazon.");
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
     }
-    });
+    }, signal);
   }
 }

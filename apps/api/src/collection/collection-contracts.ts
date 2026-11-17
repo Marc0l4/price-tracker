@@ -1,5 +1,5 @@
 import type { CollectionRun, CollectionRunStatus, CollectionTrigger, Prisma, ProviderCollectionRunStatus, TrackedSearch } from "../generated/prisma/client.js";
-import type { DetailedSearchResult } from "../services/product-search.service.js";
+import type { DetailedSearchResult, ProductSearchOptions } from "../services/product-search.service.js";
 import type { CollectionContext, SourcedProduct } from "../persistence/persistence-contracts.js";
 import type { PersistenceBatchResult } from "../persistence/persistence-result.js";
 
@@ -18,7 +18,7 @@ export interface CollectionLogger {
 
 export interface CollectionSearchPort {
   readonly providerNames: string[];
-  searchDetailed(query: string): Promise<DetailedSearchResult>;
+  searchDetailed(query: string, options?: ProductSearchOptions): Promise<DetailedSearchResult>;
 }
 
 export interface CollectionPersistencePort {

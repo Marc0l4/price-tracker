@@ -46,7 +46,7 @@ describe("configuração de ambiente", () => {
   });
 
   it("monta dependências externas apenas a partir de configuração explícita", () => {
-    const config = collectionEnvironmentFromEnvironment({ ...readEnvironment, SCAVIO_API_KEY: "test-key", SCAVIO_AMAZON_TIMEOUT_MS: "18000" });
-    expect(config).toMatchObject({ scavioApiKey: "test-key", scavioAmazonTimeoutMs: 18_000, collectionIntervalMs: 1_800_000 });
+    const config = collectionEnvironmentFromEnvironment({ ...readEnvironment, SCAVIO_API_KEY: "test-key", SCAVIO_AMAZON_TIMEOUT_MS: "18000", SCAVIO_MERCADOLIVRE_TIMEOUT_MS: "11000", ON_DEMAND_COLLECTION_BUDGET_MS: "25000" });
+    expect(config).toMatchObject({ scavioApiKey: "test-key", scavioAmazonTimeoutMs: 18_000, scavioMercadoLivreTimeoutMs: 11_000, onDemandCollectionBudgetMs: 25_000, collectionIntervalMs: 1_800_000 });
   });
 });

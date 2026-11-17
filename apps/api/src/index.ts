@@ -11,7 +11,7 @@ import { collectionEnvironmentFromEnvironment, type CollectionEnvironment } from
 
 export function createProductSearchService(configuration = collectionEnvironmentFromEnvironment()): ProductSearchService {
   return new ProductSearchService([
-    new MercadoLivreProvider(new ScavioMercadoLivreClient(configuration.scavioApiKey)),
+    new MercadoLivreProvider(new ScavioMercadoLivreClient(configuration.scavioApiKey, fetch, configuration.scavioMercadoLivreTimeoutMs)),
     new AmazonProvider(new ScavioAmazonClient(configuration.scavioApiKey, fetch, configuration.scavioAmazonTimeoutMs)),
   ]);
 }
@@ -23,7 +23,7 @@ export function createCollectionOrchestrator(db: PrismaClient, configuration = c
     new ProductPersistenceService(db),
     undefined,
     undefined,
-    { collectionTimeoutMs: configuration.collectionTimeoutMs, staleRunMs: configuration.staleRunMs },
+    { collectionTimeoutMs: configuration.collectionTimeoutMs, onDemandCollectionBudgetMs: configuration.onDemandCollectionBudgetMs, staleRunMs: configuration.staleRunMs },
   );
 }
 

@@ -35,11 +35,11 @@ describe("busca de produtos", () => {
     renderHome();
     submitSearch("iphone");
     expect(await screen.findByText("iPhone")).toBeInTheDocument();
-    expect(searchProducts).toHaveBeenLastCalledWith("iphone", 1, "history");
+    expect(searchProducts).toHaveBeenLastCalledWith("iphone", 1, "history", expect.any(AbortSignal));
     expect(window.location.search).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
-    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "history"));
+    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "history", expect.any(AbortSignal)));
     expect(screen.getByText("Página 2 de 2")).toBeInTheDocument();
   });
 
@@ -86,9 +86,9 @@ describe("busca de produtos", () => {
     submitSearch("iphone");
     await screen.findByText("iPhone");
     fireEvent.change(screen.getByLabelText("Ordenar por"), { target: { value: "price" } });
-    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 1, "price"));
+    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 1, "price", expect.any(AbortSignal)));
     fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
-    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "price"));
+    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "price", expect.any(AbortSignal)));
     view.rerender(<SearchStateProvider><p>Página do produto</p></SearchStateProvider>);
     view.rerender(<SearchStateProvider><HomePage /></SearchStateProvider>);
     expect(screen.getByLabelText("Buscar produto")).toHaveValue("iphone");
@@ -119,7 +119,7 @@ describe("busca de produtos", () => {
     submitSearch("iphone");
     await screen.findByText("iPhone");
     fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
-    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "history"));
+    await waitFor(() => expect(searchProducts).toHaveBeenLastCalledWith("iphone", 2, "history", expect.any(AbortSignal)));
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" }));
   });
 });
